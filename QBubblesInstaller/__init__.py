@@ -10,6 +10,8 @@ from ctypes.wintypes import DWORD, HRGN
 from math import sqrt
 from subprocess import Popen
 from threading import Thread
+
+from comtypes import CoInitialize
 from tkinter import Canvas, Tk
 from tkinter.ttk import Button, Label, Radiobutton, Style, Frame, Combobox, Checkbutton, Treeview, Entry, \
     Widget, Progressbar
@@ -45,73 +47,14 @@ def set_appwindow(root):
     style = style | WS_EX_APPWINDOW
     res = windll.user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style)
 
-
-    class Margins(Structure):
-        _fields_ = [("cxLeftWidth", c_int),
-                    ("cxRightWidth", c_int),
-                    ("cyTopHeight", c_int),
-                    ("cyBottomHeight", c_int)]
-
-    class BlurBehind(Structure):
-        _fields_ = [("dwFlags", wintypes.DWORD),  # 0x00000001),
-                   ("fEnable", c_bool),  # True),
-                   ("hRgnBlur", wintypes.HRGN)]  # None)]
-
-    # windll.DwmApi.DwmEnableBlurBehindWIndow(hwnd,
-    #                                         True)
-
     hwnd = win32gui.GetParent(root.winfo_id())
     l_style = win32gui.GetWindowLong(hwnd, GWL_STYLE)
     l_style &= ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU)
-    # l_style &= ~(WS_SYSMENU)
-    # l_style &= WS_SYSMENU
-    # l_style = WS_CAPTION | WS_BORDER | WS_SYSMENU | WS_MINIMIZEBOX
     win32gui.SetWindowLong(hwnd, GWL_STYLE, l_style)
     l_style = win32api.GetWindowLong(hwnd, GCL_STYLE)
     l_style |= CS_DROPSHADOW
     win32api.SetWindowLong(hwnd, GCL_STYLE, l_style)
 
-    DWM_BB_ENABLE = 0x0001
-    DWM_BB_BLURREGION = 0x0002
-    DWM_BB_TRANSITIONMAXIMIZED = 0x0003
-    WM_DWMCOMPOSITIONCHANGED = 0x031E
-
-    class DWM_BLURBEHIND(Structure):
-        """
-        http://msdn.microsoft.com/en-us/library/windows/desktop/aa969500%28v=vs.85%29.aspx
-        """
-        _fields_ = [
-            ('dwFlags', DWORD),
-            ('fEnable', c_bool),
-            ('hRgnBlur', HRGN),
-            ('fTransitionOnMaximized', c_bool)
-        ]
-
-    def DWM_enable_blur_behind_window(hwnd, enable=True):
-        """
-        Enable or disable blur behind window on a window.
-        """
-        # if not has_dwm:
-        #     return False
-
-        bb = DWM_BLURBEHIND()
-        bb.fEnable = c_bool(enable)
-        bb.dwFlags = DWM_BB_ENABLE
-        bb.hRgnBlur = None
-
-        result = _DwmEnableBlurBehindWindow(hwnd, bb)
-
-        return not result
-
-    # prototype = WINFUNCTYPE(c_int, c_int, POINTER(DWM_BLURBEHIND))
-    # params = (1, "hWnd", 0), (1, "pBlurBehind", 0)
-    # _DwmEnableBlurBehindWindow = prototype(("DwmEnableBlurBehindWindow",
-    # windll.dwmapi), params)
-    #
-    # print(DWM_enable_blur_behind_window(hwnd, True))
-
-    # windll.DwmApi.DwmEnableBlurBehindWindow(hwnd, BlurBehind(0x00000001, True, None))
-    # windll.DwmApi.DwmExtendFrameIntoClientArea(hwnd, Margins(-1))
     # re-assert the new window style
     root.wm_withdraw()
     root.wm_deiconify()
@@ -266,7 +209,7 @@ class WizardPage(Scene):
 
         self.pageFrame = Frame(self.frame)
         self.pageFrame.pack(fill="both", expand=True, padx=25, pady=30)
-        self.frame.pack(padx=1, pady=1, fill="both", expand=True)
+        self.frame.pack(padx=0, pady=0, fill="both", expand=True)
 
     def _on_button_motion(self, canvas: Canvas, id_, x, evt):
         _, y = canvas.coords(id_)
@@ -398,9 +341,18 @@ class PythonInstaller(Downloader):
         self.description: List[Label] = description
         self.options = list()
         self.options.append("/quiet")
-        self.options.append("InstallAllUsers=1")
+        self.options.append("InstallAllUsers=0")
         self.options.append("CompileAll=1")
         self.options.append("PrependPath=1")
+        self.options.append("Include_tcltk=1")
+        self.options.append("Include_launcher=1")
+        self.options.append("Include_exe=1")
+        self.options.append("Include_dev=1")
+        self.options.append("Shortcuts=0")
+        self.options.append("Include_lib=1")
+        self.options.append("Include_pip=1")
+        self.options.append("Include_test=1")
+        self.options.append("Include_tools=1")
 
     def download_url(self):
         """
@@ -551,18 +503,43 @@ class LauncherInstaller(object):
     def create_shortcuts(self):
         import os, winshell
         from win32com.client import Dispatch
+
+        CoInitialize()
+
+        value = self.progressBar.cget("value")
+        self.description[0].config(text=f"Creating Desktop Shortcut")
+
+        # Desktop item.
         desktop = winshell.desktop()
-        winshell.start_menu()
-        path = os.path.join(desktop, "Media Player Classic.lnk")
-        target = r""+os.path.join(self.root.installationDirectory, self.root.executable)
-        wDir = r"P:\Media\Media Player Classic"
-        icon = r"P:\Media\Media Player Classic\mplayerc.exe"
+        path = os.path.join(desktop, "Qplay Bubbles.lnk")
+        target = os.path.join(self.root.installationDirectory, self.root.executable)
+        wDir = self.root.installationDirectory.replace("/", "\\")
+        icon = os.path.join(self.root.installationDirectory, self.root.executable)
         shell = Dispatch('WScript.Shell')
         shortcut = shell.CreateShortCut(path)
         shortcut.Targetpath = target
         shortcut.WorkingDirectory = wDir
         shortcut.IconLocation = icon
         shortcut.save()
+
+        self.progressBar.config(value=value + 1)
+        self.description[0].config(text=f"Creating Start Menu item")
+
+        # Start Menu item.
+        startmenu = winshell.start_menu()
+        path = os.path.join(startmenu, "Qplay Bubbles.lnk")
+        target = os.path.join(self.root.installationDirectory, self.root.executable)
+        wDir = self.root.installationDirectory.replace("/", "\\")
+        icon = os.path.join(self.root.installationDirectory, self.root.executable)
+        shell = Dispatch('WScript.Shell')
+        shortcut = shell.CreateShortCut(path)
+        shortcut.Targetpath = target
+        shortcut.WorkingDirectory = wDir
+        shortcut.IconLocation = icon
+        shortcut.save()
+
+        self.progressBar.config(value=value + 2)
+
 
     def get_downloadurl(self):
         """
@@ -615,12 +592,14 @@ class LauncherInstaller(object):
         path = self.root.installationDirectory
         # print(path)
 
-        self.progressBar.config(maximum=len(members))
+        self.progressBar.config(maximum=len(members)+2)
 
         for index in range(len(members)):
             self.progressBar.config(value=index+1)
             self.description[0].config(text=f"Extracting: qbubbleslauncher.zip/{members[index]}")
             zipfile._extract_member(members[index], path, None)
+
+        self.create_shortcuts()
 
     def install(self):
         t = Thread(target=lambda: self.extract(), name="PythonInstaller")
@@ -629,7 +608,7 @@ class LauncherInstaller(object):
         while t.is_alive():
             self.root.update()
 
-        self.progressBar.config(value=self.progressBar.cget("maximum"))
+        self.progressBar.config(value=0)
 
 
 class LauncherDownloaderPage(WizardPage):
@@ -664,7 +643,7 @@ class LauncherInstallationPage(WizardPage):
         super(LauncherInstallationPage, self).__init__(root, arrow_left=(False, lambda: None),
                                                      arrow_right=(False, lambda: None))
 
-        self.title = Label(self.pageFrame, text="Downloading the Launcher...", font=("helvetica", 32))
+        self.title = Label(self.pageFrame, text="Installing the Launcher...", font=("helvetica", 32))
         self.title.pack(fill="x", padx=2, pady=7)
 
         self.description = Label(self.pageFrame,
@@ -683,7 +662,48 @@ class LauncherInstallationPage(WizardPage):
         self._root.update()
         self.launcherInstaller.install()
         self._root.sceneManager.allowClose = True
-        self.create_arrow(side="right", command=lambda: print("Launcher Installed, no new page found!!")) # self.scenemanager.change_scene("launcherDownloader"))
+        self.create_arrow(side="right", command=lambda: self.scenemanager.change_scene("installationDone")) # self.scenemanager.change_scene("launcherDownloader"))
+
+
+class InstallationDonePage(WizardPage):
+    def __init__(self, root):
+        super(InstallationDonePage, self).__init__(root, arrow_left=(False, lambda: None),
+                                                   arrow_right=(False, lambda: None))
+
+        self.title = Label(self.pageFrame, text="Installation Done!", font=("helvetica", 32))
+        self.title.pack(fill="x", padx=2, pady=7)
+
+        infoDescription = \
+        """
+Thank you for downloading and installing QBubbles.
+For more information please visit my website: https://quintenjungblut.wixsite.com/qplaysoftware
+        """
+
+        self.infodescr = Label(self.pageFrame,
+                                 text=infoDescription[1:-1],
+                                 font=("helvetica", 12))
+        self.infodescr.pack(fill="x", padx=2, pady=5)
+
+        self.rebootnote = Label(self.pageFrame,
+                                 text="You need to reboot your computer to apply the changes.\n"
+                                      "It's needed because Python was installed with PATH variable set.",
+                                 font=("helvetica", 12, "bold"))
+        self.rebootnote.pack(fill="x", padx=2, pady=5)
+
+        self.description = Label(self.pageFrame,
+                                 text="Press the button below to close the installer.\n",
+                                 font=("helvetica", 12))
+        self.description.pack(fill="x", padx=2, pady=5)
+
+        self.closeFrame = Frame(self.pageFrame)
+        self.closeButton = Button(self.closeFrame, text="Close and Reboot in 2 Minutes",
+                                  command=lambda: (self._root.destroy(), os.system("shutdown /r /t 120")))
+        self.closeButton.pack(side="right", padx=2)
+        self.closeButton = Button(self.closeFrame, text="Close",
+                                  command=lambda: (self._root.destroy()))
+        self.closeButton.pack(side="right", padx=2)
+
+        self.closeFrame.pack(side="bottom", fill="x", expand=False)
 
 
 class StartPage(WizardPage):
@@ -887,11 +907,25 @@ class Main(Tk):
     def __init__(self, argv):
         super(Main, self).__init__()
         self.wm_attributes("-alpha", 0)
+        import ctypes, sys
 
         self.installationDirectory: Optional[str] = None
         self.executable: Optional[str] = None
 
-        TitleFrame.register(self)
+        if hasattr(sys, "_MEIPASS"):
+            os.chdir(sys._MEIPASS)
+            print(sys._MEIPASS)
+
+            print()
+            print(os.listdir(sys._MEIPASS))
+
+        print()
+        print(os.getcwd())
+
+        print()
+        print(dir(sys))
+
+        # TitleFrame.register(self)
         # self.overrideredirect(True)
         # self.wm_attributes('-toolwindow', 'splash')
         screen_width = self.winfo_screenwidth()
@@ -900,8 +934,8 @@ class Main(Tk):
         y_coordinate = (screen_height / 2) - (480 / 2)
         # self.update()
         self.geometry("{}x{}+{}+{}".format(800, 480, int(x_coordinate), int(y_coordinate)))
-        title_bar = TitleFrame(self, height=32, width=800)
-        title_bar.pack(side="top", fill="x")
+        # title_bar = TitleFrame(self, height=32, width=800)
+        # title_bar.pack(side="top", fill="x")
 
         arrow_left = Image.open("img/arrowLeft.png")  # .resize((12, 12), Image.ANTIALIAS)
         arrow_right = Image.open("img/arrowRight.png")  # .resize((12, 12), Image.ANTIALIAS)
@@ -966,13 +1000,14 @@ class Main(Tk):
         self.sceneManager.add_scene(PythonInstallationPage(self), "pythonInstallation")
         self.sceneManager.add_scene(LauncherDownloaderPage(self), "launcherDownloader")
         self.sceneManager.add_scene(LauncherInstallationPage(self), "launcherInstallation")
+        self.sceneManager.add_scene(InstallationDonePage(self), "installationDone")
         # print(scene_manager._scenes)
         self.sceneManager.change_scene("startScene")
 
         self.bind('<<TitleFrameClose>>', lambda ev: self.destroy() if self.sceneManager.allowClose else None)
         self.bind('<<TitleFrameMinimize>>', lambda ev: self.wm_iconify())
         # self.bind('<Key-Escape>', lambda ev: self.destroy())
-        self.after(10, lambda: set_appwindow(self))
+        # self.after(10, lambda: set_appwindow(self))
 
         win32gui.SetWindowPos(self.winfo_id(), -2, int(x_coordinate), int(y_coordinate), 800, 480, 0x0040)
 
@@ -1095,4 +1130,30 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    from ctypes import windll
+
+    # noinspection PyBroadException
+    def is_admin():
+        try:
+            return windll.shell32.IsUserAnAdmin()
+        except:
+            return False
+
+
+    if is_admin():
+        main()
+    else:
+        # Re-run the program with admin rights
+        if hasattr(sys, "_MEIPASS"):
+            # print(sys.argv[0])
+            # print(__file__)
+            # exit(0)
+            windll.shell32.ShellExecuteW(None, "runas", sys.argv[0], " ".join(sys.argv[1:]), None, 1)
+            sys.exit(0)
+        windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+        sys.exit(0)
+
+    # import winshell
+    # print(winshell.desktop(1))
+    # with open(os.path.join(winshell.desktop(1), "test.txt"), "w+") as file:
+    #     file.write("Test Successful\r\n")
