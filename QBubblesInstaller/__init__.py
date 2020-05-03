@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import sys
@@ -13,6 +14,7 @@ from tkinter import Canvas, Tk
 from tkinter.ttk import Button, Label, Radiobutton, Style, Frame, Combobox, Checkbutton, Treeview, Entry, \
     Widget, Progressbar
 from typing import Optional, Dict, Any, Callable, Tuple, List
+from zipfile import ZipFile
 
 import win32api
 import win32gui
@@ -532,7 +534,7 @@ class PythonInstallationPage(WizardPage):
         self._root.update()
         self.pyInstaller.install()
         self._root.sceneManager.allowClose = True
-        self.create_arrow(side="right", command=lambda: print("PythonInstallationPage NEXT PAGE EVENT"))
+        self.create_arrow(side="right", command=lambda: self.scenemanager.change_scene("launcherDownloader"))
 
 
 class LauncherInstaller(object):
@@ -546,6 +548,22 @@ class LauncherInstaller(object):
         self.options.append("CompileAll=1")
         self.options.append("PrependPath=1")
 
+    def create_shortcuts(self):
+        import os, winshell
+        from win32com.client import Dispatch
+        desktop = winshell.desktop()
+        winshell.start_menu()
+        path = os.path.join(desktop, "Media Player Classic.lnk")
+        target = r""+os.path.join(self.root.installationDirectory, self.root.executable)
+        wDir = r"P:\Media\Media Player Classic"
+        icon = r"P:\Media\Media Player Classic\mplayerc.exe"
+        shell = Dispatch('WScript.Shell')
+        shortcut = shell.CreateShortCut(path)
+        shortcut.Targetpath = target
+        shortcut.WorkingDirectory = wDir
+        shortcut.IconLocation = icon
+        shortcut.save()
+
     def get_downloadurl(self):
         """
         Returns 64-bit python installer url if system is 64-bit else the 32-bit version.
@@ -557,7 +575,16 @@ class LauncherInstaller(object):
         import urllib.error
         import http.client
 
-        request: http.client.HTTPResponse = urllib.request.urlopen("")
+        request: http.client.HTTPResponse = urllib.request.urlopen(
+            "https://github.com/Qboi123/QBubblesInstaller/raw/master/launcherdata.json")
+
+        raw_json = request.read()
+        data = json.loads(raw_json)
+        url = data["DownloadUrl"]
+
+        self.root.executable = data["ExecutablePath"]
+
+        return url
 
         # if platform.architecture()[0] == "64bit":
         #     return url_x64
@@ -567,7 +594,7 @@ class LauncherInstaller(object):
     def download(self):
         url = self.get_downloadurl()
 
-        downloader = Downloader(url, fp="python377-installer.exe")
+        downloader = Downloader(url, fp="qbubbleslauncher.zip")
         downloader.download()
 
         self.progressBar.config(maximum=downloader.fileSize)
@@ -579,15 +606,30 @@ class LauncherInstaller(object):
                                             f"\n\n")
             self.root.update()
 
+    def extract(self):
+        zipfile = ZipFile("qbubbleslauncher.zip", "r")
+
+        members = zipfile.namelist()
+        # print(members)
+
+        path = self.root.installationDirectory
+        # print(path)
+
+        self.progressBar.config(maximum=len(members))
+
+        for index in range(len(members)):
+            self.progressBar.config(value=index+1)
+            self.description[0].config(text=f"Extracting: qbubbleslauncher.zip/{members[index]}")
+            zipfile._extract_member(members[index], path, None)
+
     def install(self):
-        t = Thread(target=lambda: os.system("python377-installer.exe" + " ".join(self.options)), name="PythonInstaller")
+        t = Thread(target=lambda: self.extract(), name="PythonInstaller")
         t.start()
 
         while t.is_alive():
             self.root.update()
 
         self.progressBar.config(value=self.progressBar.cget("maximum"))
-
 
 
 class LauncherDownloaderPage(WizardPage):
@@ -604,8 +646,44 @@ class LauncherDownloaderPage(WizardPage):
         self.description.pack(fill="x", padx=2, pady=5)
 
         self.progressBar = Progressbar(self.pageFrame, maximum=100, value=0)
-        self.pyInstaller = LauncherInstaller(progressbar=self.progressBar, root=self._root, description=[self.description])
+        self.launcherInstaller = LauncherInstaller(
+            progressbar=self.progressBar, root=self._root, description=[self.description])
         self.progressBar.pack(fill="x")
+
+    def show_scene(self, *args, **kwargs):
+        super(LauncherDownloaderPage, self).show_scene(*args, **kwargs)
+        self._root.sceneManager.allowClose = False
+        self._root.update()
+        self.launcherInstaller.download()
+        self._root.sceneManager.allowClose = True
+        self.create_arrow(side="right", command=lambda: self.scenemanager.change_scene("launcherInstallation"))
+
+
+class LauncherInstallationPage(WizardPage):
+    def __init__(self, root):
+        super(LauncherInstallationPage, self).__init__(root, arrow_left=(False, lambda: None),
+                                                     arrow_right=(False, lambda: None))
+
+        self.title = Label(self.pageFrame, text="Downloading the Launcher...", font=("helvetica", 32))
+        self.title.pack(fill="x", padx=2, pady=7)
+
+        self.description = Label(self.pageFrame,
+                                 text="...",
+                                 font=("helvetica", 12))
+        self.description.pack(fill="x", padx=2, pady=5)
+
+        self.progressBar = Progressbar(self.pageFrame, maximum=100, value=0)
+        self.launcherInstaller = LauncherInstaller(
+            progressbar=self.progressBar, root=self._root, description=[self.description])
+        self.progressBar.pack(fill="x")
+
+    def show_scene(self, *args, **kwargs):
+        super(LauncherInstallationPage, self).show_scene(*args, **kwargs)
+        self._root.sceneManager.allowClose = False
+        self._root.update()
+        self.launcherInstaller.install()
+        self._root.sceneManager.allowClose = True
+        self.create_arrow(side="right", command=lambda: print("Launcher Installed, no new page found!!")) # self.scenemanager.change_scene("launcherDownloader"))
 
 
 class StartPage(WizardPage):
@@ -811,6 +889,7 @@ class Main(Tk):
         self.wm_attributes("-alpha", 0)
 
         self.installationDirectory: Optional[str] = None
+        self.executable: Optional[str] = None
 
         TitleFrame.register(self)
         # self.overrideredirect(True)
@@ -885,6 +964,8 @@ class Main(Tk):
         self.sceneManager.add_scene(InstallationOptionsPage(self), "installationOptions")
         self.sceneManager.add_scene(PythonDownloadPage(self), "pythonDownload")
         self.sceneManager.add_scene(PythonInstallationPage(self), "pythonInstallation")
+        self.sceneManager.add_scene(LauncherDownloaderPage(self), "launcherDownloader")
+        self.sceneManager.add_scene(LauncherInstallationPage(self), "launcherInstallation")
         # print(scene_manager._scenes)
         self.sceneManager.change_scene("startScene")
 
